@@ -19,6 +19,8 @@ public abstract class MirroringAudioSourceManager extends ExtendedAudioSourceMan
 
 	public static final String ISRC_PATTERN = "%ISRC%";
 	public static final String QUERY_PATTERN = "%QUERY%";
+	public static final String QUERY_TITLE_PATTERN = "%QUERY_TITLE%";
+
 	private static final Logger log = LoggerFactory.getLogger(MirroringAudioSourceManager.class);
 	protected final Function<Void, AudioPlayerManager> audioPlayerManager;
 	protected final MirroringAudioTrackResolver resolver;

@@ -45,7 +45,11 @@ public class DefaultMirroringAudioTrackResolver implements MirroringAudioTrackRe
 				}
 			}
 
-			provider = provider.replace(MirroringAudioSourceManager.QUERY_PATTERN, getTrackTitle(mirroringAudioTrack));
+			if (provider.contains(MirroringAudioSourceManager.QUERY_TITLE_PATTERN)) {
+				provider = provider.replace(MirroringAudioSourceManager.QUERY_TITLE_PATTERN, getTitle(mirroringAudioTrack));
+			}
+
+			provider = provider.replace(MirroringAudioSourceManager.QUERY_PATTERN, getQuery(mirroringAudioTrack));
 			try {
 				track = mirroringAudioTrack.loadItem(provider);
 			}
@@ -60,11 +64,16 @@ public class DefaultMirroringAudioTrackResolver implements MirroringAudioTrackRe
 		return track;
 	}
 
-	public String getTrackTitle(MirroringAudioTrack mirroringAudioTrack) {
+	public String getQuery(MirroringAudioTrack mirroringAudioTrack) {
 		var query = mirroringAudioTrack.getInfo().title;
 		if (!mirroringAudioTrack.getInfo().author.equals("unknown")) {
 			query += " " + mirroringAudioTrack.getInfo().author;
 		}
+		return query;
+	}
+
+	public String getTitle(MirroringAudioTrack mirroringAudioTrack) {
+		var query = mirroringAudioTrack.getInfo().title;
 		return query;
 	}
 
