@@ -29,17 +29,6 @@ public abstract class MirroringAudioTrack extends ExtendedAudioTrack {
 
 	@Override
 	public void process(LocalAudioTrackExecutor executor) throws Exception {
-		if (this.isPreview) {
-			if (this.previewUrl == null) {
-				throw new FriendlyException("No preview url found", FriendlyException.Severity.COMMON, new IllegalArgumentException());
-			}
-			try (var httpInterface = this.sourceManager.getHttpInterface()) {
-				try (var stream = new PersistentHttpStream(httpInterface, new URI(this.previewUrl), this.trackInfo.length)) {
-					processDelegate(createAudioTrack(this.trackInfo, stream), executor);
-				}
-			}
-			return;
-		}
 		var track = this.sourceManager.getResolver().apply(this);
 
 		if (track instanceof AudioPlaylist) {
