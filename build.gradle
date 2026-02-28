@@ -56,36 +56,6 @@ subprojects {
 
     publishing {
         repositories {
-            if (isMavenDefined) {
-                System.out.println("Publishing to Maven Repo")
-
-                def snapshots = "https://maven.topi.wtf/snapshots"
-                def releases = "https://maven.topi.wtf/releases"
-
-                maven {
-                    name = "Reposilite"
-                    url = isSnapshot ? snapshots : releases
-                    credentials {
-                        username = findProperty("MAVEN_USERNAME")
-                        password = findProperty("MAVEN_PASSWORD")
-                    }
-
-                }
-            }
-            if (isLavalinkMavenDefined && name == "plugin") {
-                System.out.println("Publishing to Lavalink Maven Repo")
-                def lavalinkSnapshots = "https://maven.lavalink.dev/snapshots"
-                def lavalinkReleases = "https://maven.lavalink.dev/releases"
-
-                maven {
-                    name = "Reposilite-Lavalink"
-                    url = isSnapshot ? lavalinkSnapshots : lavalinkReleases
-                    credentials {
-                        username = findProperty("LAVALINK_MAVEN_USERNAME")
-                        password = findProperty("LAVALINK_MAVEN_PASSWORD")
-                    }
-                }
-            }
             if (isGithubPackagesDefined) {
                 System.out.println("Publishing to GitHub Packages")
 
