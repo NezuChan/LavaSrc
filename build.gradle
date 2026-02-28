@@ -61,7 +61,7 @@ subprojects {
 
                 maven {
                     name = "GitHubPackages"
-                    url = "https://maven.pkg.github.com/topi314/LavaSrc"
+                    url = "https://maven.pkg.github.com/nezuchan/LavaSrc"
                     credentials {
                         username = findProperty("GITHUB_ACTOR")
                         password = findProperty("GITHUB_TOKEN")
