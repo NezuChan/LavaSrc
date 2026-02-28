@@ -42,6 +42,7 @@ def getGitVersion() {
 
 var isMavenDefined = findProperty("MAVEN_USERNAME") != null && findProperty("MAVEN_PASSWORD") != null
 var isLavalinkMavenDefined = findProperty("LAVALINK_MAVEN_USERNAME") != null && findProperty("LAVALINK_MAVEN_PASSWORD") != null
+var isGithubPackagesDefined = findProperty("GITHUB_ACTOR") != null && findProperty("GITHUB_TOKEN") != null
 
 subprojects {
     apply plugin: "java"
@@ -82,6 +83,18 @@ subprojects {
                     credentials {
                         username = findProperty("LAVALINK_MAVEN_USERNAME")
                         password = findProperty("LAVALINK_MAVEN_PASSWORD")
+                    }
+                }
+            }
+            if (isGithubPackagesDefined) {
+                System.out.println("Publishing to GitHub Packages")
+
+                maven {
+                    name = "GitHubPackages"
+                    url = "https://maven.pkg.github.com/topi314/LavaSrc"
+                    credentials {
+                        username = findProperty("GITHUB_ACTOR")
+                        password = findProperty("GITHUB_TOKEN")
                     }
                 }
             }
