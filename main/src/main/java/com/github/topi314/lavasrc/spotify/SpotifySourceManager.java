@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.DataInput;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -375,6 +376,13 @@ public class SpotifySourceManager extends MirroringAudioSourceManager implements
 		}
 		if (id == null) return null;
 
+		// Primary: resolve via metadata endpoint
+		var metadata = this.fetchTrackMetadata(id);
+		if (metadata != null) {
+			var track = this.buildTrackFromMetadata(metadata);
+			if (track != null) return track;
+		}
+
 		var name = json.get("name").safeText();
 		if (name.isEmpty()) return null;
 
@@ -420,6 +428,7 @@ public class SpotifySourceManager extends MirroringAudioSourceManager implements
 		// ISRC: internal uses externalIds.isrc
 		var isrc = json.get("externalIds").get("isrc").text();
 		if (isrc == null) isrc = json.get("external_ids").get("isrc").text();
+		if (isrc == null) isrc = json.get("external_id").values().get(0).get("id").text();
 
 		return new SpotifyAudioTrack(
 			new AudioTrackInfo(
@@ -811,21 +820,28 @@ public class SpotifySourceManager extends MirroringAudioSourceManager implements
 	}
 
 	public AudioItem getTrack(String id, boolean preview) throws IOException {
-		// Try internal API first (uses anonymous token, no client credentials required)
+		// Try internal GraphQL API first (works with anonymous token)
 		if (!preview) {
 			try {
 				var data = this.postInternalApiJson(QUERY_GET_TRACK, "{\"uri\":\"spotify:track:" + id + "\"}");
 				if (data != null && !data.get("trackUnion").isNull()
 						&& !"NotFound".equals(data.get("trackUnion").get("__typename").text())) {
 					var track = this.parseInternalTrack(data.get("trackUnion"));
-					if (track != null) return track;
+					if (track != null) {
+						return track;
+					}
 				}
 			} catch (Exception e) {
-				log.debug("Internal getTrack failed, falling back to official API", e);
+				log.debug("Internal getTrack failed, trying metadata endpoint", e);
 			}
+
+			// Metadata endpoint fallback: works without client credentials
+			var metadata = this.fetchTrackMetadata(id);
+			var metadataTrack = this.buildTrackFromMetadata(metadata);
+			if (metadataTrack != null) return metadataTrack;
 		}
 
-		// Fallback: official API
+		// Final fallback: official API (requires client credentials)
 		var json = this.getJson(API_BASE + "tracks/" + id, false, this.preferAnonymousToken);
 		if (json == null) {
 			return AudioReference.NO_TRACK;
@@ -837,6 +853,113 @@ public class SpotifySourceManager extends MirroringAudioSourceManager implements
 		}
 
 		return this.parseTrack(json, preview);
+	}
+
+	/**
+	 * Converts a Spotify base-62 track ID to its 32-character lowercase hex representation
+	 * required by the {@code /metadata/4/track/} endpoint.
+	 */
+	private static String base62ToHex(String id) {
+		final var alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+		var bn = BigInteger.ZERO;
+		for (char c : id.toCharArray()) {
+			bn = bn.multiply(BigInteger.valueOf(62)).add(BigInteger.valueOf(alphabet.indexOf(c)));
+		}
+		var hex = bn.toString(16);
+		while (hex.length() < 32) hex = "0" + hex;
+		return hex;
+	}
+
+	/**
+	 * Fetches raw track metadata from {@code spclient.wg.spotify.com/metadata/4/track/}.
+	 * Uses the anonymous token when available, falling back to the official access token.
+	 * Returns the parsed JSON body, or {@code null} on failure.
+	 */
+	private JsonBrowser fetchTrackMetadata(String id) {
+		try {
+			var hexId = base62ToHex(id);
+			var url = CLIENT_API_BASE + "metadata/4/track/" + hexId + "?market=from_token";
+
+			String token;
+			try {
+				token = this.tokenTracker.getAnonymousAccessToken();
+			} catch (Exception e) {
+				token = this.tokenTracker.getAccessToken(false);
+			}
+			if (token == null) return null;
+
+			var request = new HttpGet(url);
+			request.addHeader("Authorization", "Bearer " + token);
+			request.addHeader("Accept", "application/json");
+			request.addHeader("App-Platform", "WebPlayer");
+			request.addHeader("Spotify-App-Version", "1.2.83.284.g147edeea");
+			return LavaSrcTools.fetchResponseAsJson(this.httpInterfaceManager.getInterface(), request);
+		} catch (Exception e) {
+			log.debug("fetchTrackMetadata failed for {}: {}", id, e.getMessage());
+			return null;
+		}
+	}
+
+	/**
+	 * Builds a {@link SpotifyAudioTrack} from the metadata endpoint response shape
+	 * ({@code artist[]}, {@code duration}, {@code album.cover_group.image[]}, {@code external_id[]}).
+	 */
+	private SpotifyAudioTrack buildTrackFromMetadata(JsonBrowser metadata) {
+		if (metadata == null || metadata.isNull() || metadata.get("name").isNull()) return null;
+
+		// ID: prefer canonical_uri (spotify:track:<id>), fall back to gid
+		String id = null;
+		var canonicalUri = metadata.get("canonical_uri").text();
+		if (canonicalUri != null && canonicalUri.startsWith("spotify:track:")) {
+			var parts = canonicalUri.split(":");
+			if (parts.length == 3) id = parts[2];
+		}
+		if (id == null) id = metadata.get("gid").text();
+		if (id == null) return null;
+
+		var name = metadata.get("name").safeText();
+		if (name.isEmpty()) return null;
+
+		// artists
+		var artistSb = new StringBuilder();
+		for (var artist : metadata.get("artist").values()) {
+			if (artistSb.length() > 0) artistSb.append(", ");
+			var n = artist.get("name").text();
+			if (n != null) artistSb.append(n);
+		}
+		if (artistSb.length() == 0) artistSb.append("Unknown");
+
+		var duration = metadata.get("duration").asLong(0);
+
+		// artwork: album.cover_group.image[size=LARGE|DEFAULT].file_id
+		String artworkUrl = null;
+		for (var img : metadata.get("album").get("cover_group").get("image").values()) {
+			var size = img.get("size").text();
+			if ("LARGE".equals(size) || "DEFAULT".equals(size)) {
+				var fileId = img.get("file_id").text();
+				if (fileId != null) {
+					artworkUrl = "https://i.scdn.co/image/" + fileId.toLowerCase();
+					break;
+				}
+			}
+		}
+
+		// ISRC
+		String isrc = null;
+		for (var extId : metadata.get("external_id").values()) {
+			if ("isrc".equals(extId.get("type").text())) {
+				isrc = extId.get("id").text();
+				break;
+			}
+		}
+
+		var albumName = metadata.get("album").get("name").text();
+
+		return new SpotifyAudioTrack(
+			new AudioTrackInfo(name, artistSb.toString(), duration, id, false,
+				"https://open.spotify.com/track/" + id, artworkUrl, isrc),
+			albumName, null, null, null, null, false, this
+		);
 	}
 
 	/**
@@ -872,6 +995,16 @@ public class SpotifySourceManager extends MirroringAudioSourceManager implements
 	}
 
 	private AudioTrack parseTrack(JsonBrowser json, boolean preview) {
+		if (!preview) {
+			var trackId = json.get("id").text();
+			if (trackId != null && !trackId.isEmpty()) {
+				var metadata = this.fetchTrackMetadata(trackId);
+				if (metadata != null) {
+					var track = this.buildTrackFromMetadata(metadata);
+					if (track != null) return track;
+				}
+			}
+		}
 		return new SpotifyAudioTrack(
 			new AudioTrackInfo(
 				json.get("name").safeText(),
